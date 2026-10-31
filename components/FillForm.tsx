@@ -14,7 +14,11 @@ const FUELS: { v: FuelType; label: string }[] = [
 ];
 
 type Props = {
+  carId: number;
+  /** Fill-ups of this car (for defaults like fuel type). */
   all: Fillup[];
+  /** Fill-ups of every car (stations and places are shared). */
+  everything?: Fillup[];
   initial?: Fillup | null;
   onSave: (f: FillupInput) => Promise<void>;
   onCancel?: () => void;
@@ -22,7 +26,7 @@ type Props = {
 
 const toText = (n: number | undefined, d: number) => (n === undefined ? "" : n.toFixed(d).replace(".", ","));
 
-export default function FillForm({ all, initial, onSave, onCancel }: Props) {
+export default function FillForm({ carId, all, everything, initial, onSave, onCancel }: Props) {
   const lastUsed = all[all.length - 1];
   const [date, setDate] = useState(initial?.filled_on ?? localISO());
   const [cost, setCost] = useState(toText(initial?.total_cost, 2));
@@ -36,8 +40,9 @@ export default function FillForm({ all, initial, onSave, onCancel }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const stations = useMemo(() => knownStations(all), [all]);
-  const places = useMemo(() => knownPlaces(all), [all]);
+  const pool = everything ?? all;
+  const stations = useMemo(() => knownStations(pool), [pool]);
+  const places = useMemo(() => knownPlaces(pool), [pool]);
 
   const c = parseNum(cost);
   const l = parseNum(liters);
@@ -58,6 +63,7 @@ export default function FillForm({ all, initial, onSave, onCancel }: Props) {
     setError(null);
     try {
       await onSave({
+        car_id: initial?.car_id ?? carId,
         filled_on: date,
         total_cost: Math.round(c * 100) / 100,
         liters: Math.round(l * 1000) / 1000,

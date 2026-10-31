@@ -3,8 +3,30 @@ export const API_URL = "https://br-royal-sound-b8c99kph-gastrack.compute.c-14.us
 
 export type FuelType = "gasolina" | "etanol" | "diesel" | "gnv";
 
+export type Car = {
+  id: number;
+  plate: string; // ABC1234 or ABC1D23, no hyphen
+  nickname: string | null;
+};
+
+export type CarInput = Omit<Car, "id">;
+
+/** ABC1234 -> ABC-1234 (old style). Mercosul ABC1D23 stays as is. */
+export function formatPlate(p: string): string {
+  return /^[A-Z]{3}[0-9]{4}$/.test(p) ? `${p.slice(0, 3)}-${p.slice(3)}` : p;
+}
+
+export function cleanPlate(v: string): string {
+  return v.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+export const isPlate = (v: string) => /^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(cleanPlate(v));
+
+export const carLabel = (c: Car) => (c.nickname ? `${c.nickname} · ${formatPlate(c.plate)}` : formatPlate(c.plate));
+
 export type Fillup = {
   id: number;
+  car_id: number;
   filled_on: string; // YYYY-MM-DD
   km_driven: number;
   liters: number;
@@ -60,7 +82,8 @@ async function call<T>(path: string, init: RequestInit = {}, key = getKey()): Pr
   return data as T;
 }
 
-const clean = (f: Fillup): Fillup => ({ ...f, id: Number(f.id) });
+const clean = (f: Fillup): Fillup => ({ ...f, id: Number(f.id), car_id: Number(f.car_id) });
+const cleanCar = (c: Car): Car => ({ ...c, id: Number(c.id) });
 
 export const api = {
   checkKey: (key: string) => call<{ ok: boolean }>("/auth", {}, key),
@@ -68,5 +91,10 @@ export const api = {
   create: async (f: FillupInput) => clean(await call<Fillup>("/fillups", { method: "POST", body: JSON.stringify(f) })),
   update: async (id: number, f: FillupInput) =>
     clean(await call<Fillup>(`/fillups/${id}`, { method: "PUT", body: JSON.stringify(f) })),
+  cars: async () => (await call<Car[]>("/cars")).map(cleanCar),
+  createCar: async (c: CarInput) => cleanCar(await call<Car>("/cars", { method: "POST", body: JSON.stringify(c) })),
+  updateCar: async (id: number, c: CarInput) =>
+    cleanCar(await call<Car>(`/cars/${id}`, { method: "PUT", body: JSON.stringify(c) })),
+  removeCar: (id: number) => call<{ ok: boolean }>(`/cars/${id}`, { method: "DELETE" }),
   remove: (id: number) => call<{ ok: boolean }>(`/fillups/${id}`, { method: "DELETE" }),
 };

@@ -1,50 +1,94 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { BarChart3, Fuel, List, LogOut, Loader2, RefreshCw } from "lucide-react";
-import { api, ApiError, getKey, setKey, type Fillup, type FillupInput } from "@/lib/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { BarChart3, Car as CarIcon, Fuel, List, LogOut, Loader2, RefreshCw } from "lucide-react";
+import { api, ApiError, carLabel, getKey, setKey, type Car, type CarInput, type Fillup, type FillupInput } from "@/lib/api";
 import { dec } from "@/lib/metrics";
 import FillForm from "@/components/FillForm";
 import Dashboard from "@/components/Dashboard";
 import History from "@/components/History";
 import KeyGate from "@/components/KeyGate";
+import CarPicker, { CarForm } from "@/components/CarPicker";
 
 type Tab = "add" | "dash" | "list";
-const CACHE = "gas-track-cache";
+const CACHE = "gas-track-cache-v2";
+const CAR_KEY = "gas-track-car";
 
-function readCache(): Fillup[] {
+type Cache = { cars: Car[]; fillups: Fillup[] };
+
+function readCache(): Cache {
   try {
-    return JSON.parse(localStorage.getItem(CACHE) || "[]");
+    const c = JSON.parse(localStorage.getItem(CACHE) || "{}");
+    return { cars: c.cars || [], fillups: c.fillups || [] };
   } catch {
-    return [];
+    return { cars: [], fillups: [] };
   }
 }
-function writeCache(d: Fillup[]) {
+function writeCache(c: Cache) {
   try {
-    localStorage.setItem(CACHE, JSON.stringify(d));
+    localStorage.setItem(CACHE, JSON.stringify(c));
+  } catch {
+    /* ignore */
+  }
+}
+function readCar(): number | null {
+  try {
+    const v = Number(localStorage.getItem(CAR_KEY));
+    return v > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+function writeCar(id: number | null) {
+  try {
+    if (id) localStorage.setItem(CAR_KEY, String(id));
+    else localStorage.removeItem(CAR_KEY);
   } catch {
     /* ignore */
   }
 }
 
+const byDate = (a: Fillup, b: Fillup) => (a.filled_on === b.filled_on ? a.id - b.id : a.filled_on < b.filled_on ? -1 : 1);
+
 export default function Home() {
   const [ready, setReady] = useState(false);
   const [authed, setAuthed] = useState(false);
   const [tab, setTab] = useState<Tab>("add");
+  const [cars, setCars] = useState<Car[]>([]);
   const [data, setData] = useState<Fillup[]>([]);
+  const [carId, setCarId] = useState<number | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Fillup | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [formKey, setFormKey] = useState(0);
 
+  const save = (nextCars: Car[], nextData: Fillup[]) => {
+    setCars(nextCars);
+    setData(nextData);
+    writeCache({ cars: nextCars, fillups: nextData });
+  };
+
+  const pickCar = useCallback((id: number | null) => {
+    setCarId(id);
+    writeCar(id);
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const d = await api.list();
+      const [c, d] = await Promise.all([api.cars(), api.list()]);
+      setCars(c);
       setData(d);
-      writeCache(d);
+      writeCache({ cars: c, fillups: d });
+      setCarId((cur) => {
+        const keep = cur && c.some((x) => x.id === cur) ? cur : c[0]?.id ?? null;
+        writeCar(keep);
+        return keep;
+      });
+      setLoaded(true);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         setKey(null);
@@ -58,7 +102,14 @@ export default function Home() {
   useEffect(() => {
     const has = !!getKey();
     setAuthed(has);
-    if (has) setData(readCache());
+    if (has) {
+      const c = readCache();
+      setCars(c.cars);
+      setData(c.fillups);
+      const saved = readCar();
+      setCarId(saved && c.cars.some((x) => x.id === saved) ? saved : c.cars[0]?.id ?? null);
+      if (c.cars.length) setLoaded(true);
+    }
     setReady(true);
   }, []);
 
@@ -72,16 +123,22 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  const all = useMemo(() => [...data].sort(byDate), [data]);
+  const mine = useMemo(() => all.filter((f) => f.car_id === carId), [all, carId]);
+  const counts = useMemo(() => {
+    const m: Record<number, number> = {};
+    for (const f of data) m[f.car_id] = (m[f.car_id] || 0) + 1;
+    return m;
+  }, [data]);
+
   if (!ready) return null;
   if (!authed) return <KeyGate onOk={() => setAuthed(true)} />;
 
-  const sorted = [...data].sort((a, b) => (a.filled_on === b.filled_on ? a.id - b.id : a.filled_on < b.filled_on ? -1 : 1));
+  const current = cars.find((c) => c.id === carId) || null;
 
   async function create(f: FillupInput) {
     const saved = await api.create(f);
-    const next = [...data, saved];
-    setData(next);
-    writeCache(next);
+    save(cars, [...data, saved]);
     setFormKey((k) => k + 1);
     setToast(`Salvo · ${dec(saved.km_driven / saved.liters, 1)} km/l`);
     setTab("dash");
@@ -91,9 +148,7 @@ export default function Home() {
   async function update(f: FillupInput) {
     if (!editing) return;
     const saved = await api.update(editing.id, f);
-    const next = data.map((d) => (d.id === saved.id ? saved : d));
-    setData(next);
-    writeCache(next);
+    save(cars, data.map((d) => (d.id === saved.id ? saved : d)));
     setEditing(null);
     setToast("Alterado");
   }
@@ -101,30 +156,54 @@ export default function Home() {
   async function remove(f: Fillup) {
     try {
       await api.remove(f.id);
-      const next = data.filter((d) => d.id !== f.id);
-      setData(next);
-      writeCache(next);
+      save(cars, data.filter((d) => d.id !== f.id));
       setToast("Apagado");
     } catch (e) {
       setToast(e instanceof Error ? e.message : "Não apagou");
     }
   }
 
-  const titles: Record<Tab, string> = { add: "Novo abastecimento", dash: "Painel", list: "Histórico" };
+  async function addCar(c: CarInput) {
+    const saved = await api.createCar(c);
+    save([...cars, saved], data);
+    pickCar(saved.id);
+    setFormKey((k) => k + 1);
+    setToast(`Carro ${carLabel(saved)} cadastrado`);
+  }
+
+  async function editCar(id: number, c: CarInput) {
+    const saved = await api.updateCar(id, c);
+    save(cars.map((x) => (x.id === id ? saved : x)), data);
+  }
+
+  async function deleteCar(id: number) {
+    await api.removeCar(id);
+    const next = cars.filter((x) => x.id !== id);
+    save(next, data);
+    if (carId === id) pickCar(next[0]?.id ?? null);
+    setToast("Carro apagado");
+  }
+
+  const titles: Record<Tab, string> = { add: "Abastecer", dash: "Painel", list: "Histórico" };
+  const noCars = loaded && cars.length === 0;
 
   return (
     <div className="mx-auto max-w-xl min-h-dvh pb-28">
-      <header className="sticky top-0 z-10 bg-bg/90 backdrop-blur px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-accent text-accent-ink grid place-items-center"><Fuel size={17} /></div>
-          <h1 className="text-lg font-extrabold">{titles[tab]}</h1>
+      <header className="sticky top-0 z-10 bg-bg/90 backdrop-blur px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-accent text-accent-ink grid place-items-center shrink-0"><Fuel size={17} /></div>
+          <h1 className={`text-lg font-extrabold truncate ${cars.length ? "hidden min-[420px]:block" : ""}`}>{titles[tab]}</h1>
         </div>
-        <div className="flex items-center gap-1 text-muted">
+        <div className="flex items-center gap-0.5 text-muted shrink-0">
+          {cars.length > 0 && (
+            <CarPicker cars={cars} selectedId={carId} counts={counts} onSelect={pickCar}
+              onCreate={addCar} onUpdate={editCar} onDelete={deleteCar} />
+          )}
           <button aria-label="Atualizar" className="p-2 rounded-lg hover:bg-surface-2" onClick={load}>
             {loading ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
           </button>
           <button aria-label="Sair" className="p-2 rounded-lg hover:bg-surface-2"
-            onClick={() => { setKey(null); setAuthed(false); setData([]); writeCache([]); }}>
+            onClick={() => { setKey(null); setAuthed(false); save([], []); pickCar(null); setLoaded(false); }}>
             <LogOut size={18} />
           </button>
         </div>
@@ -138,13 +217,34 @@ export default function Home() {
           </div>
         )}
 
-        {tab === "add" && (
+        {!loaded && !error && (
+          <div className="card p-8 grid place-items-center text-muted"><Loader2 className="animate-spin" /></div>
+        )}
+
+        {noCars && (
           <div className="card p-4">
-            <FillForm key={formKey} all={sorted} onSave={create} />
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-surface-2 grid place-items-center text-accent"><CarIcon size={20} /></div>
+              <div>
+                <h2 className="font-extrabold">Cadastre seu carro</h2>
+                <p className="text-sm text-muted">Depois é só trocar pela placa no topo.</p>
+              </div>
+            </div>
+            <CarForm onSave={addCar} saveLabel="Cadastrar carro" />
           </div>
         )}
-        {tab === "dash" && <Dashboard data={sorted} />}
-        {tab === "list" && <History data={sorted} onEdit={setEditing} onDelete={remove} />}
+
+        {loaded && current && (
+          <>
+            {tab === "add" && (
+              <div className="card p-4">
+                <FillForm key={`${formKey}-${current.id}`} carId={current.id} all={mine} everything={all} onSave={create} />
+              </div>
+            )}
+            {tab === "dash" && <Dashboard key={current.id} data={mine} />}
+            {tab === "list" && <History data={mine} onEdit={setEditing} onDelete={remove} />}
+          </>
+        )}
       </main>
 
       {editing && (
@@ -152,13 +252,14 @@ export default function Home() {
           <div className="card w-full max-w-xl max-h-[92dvh] overflow-auto p-4 rounded-b-none sm:rounded-b-2xl"
             onClick={(e) => e.stopPropagation()}>
             <h2 className="font-extrabold mb-3">Editar abastecimento</h2>
-            <FillForm all={sorted} initial={editing} onSave={update} onCancel={() => setEditing(null)} />
+            <FillForm carId={editing.car_id} all={mine} everything={all} initial={editing} onSave={update}
+              onCancel={() => setEditing(null)} />
           </div>
         </div>
       )}
 
       {toast && (
-        <div className="fixed left-1/2 -translate-x-1/2 bottom-24 z-40 bg-ink text-bg rounded-full px-4 py-2 text-sm font-semibold shadow-lg">
+        <div className="fixed left-1/2 -translate-x-1/2 bottom-24 z-50 bg-ink text-bg rounded-full px-4 py-2 text-sm font-semibold shadow-lg max-w-[90vw] truncate">
           {toast}
         </div>
       )}

@@ -81,6 +81,8 @@ function validate(body: Input) {
     ? body.fuel_type
     : "gasolina";
   const hadTrip = body.had_trip === true;
+  const carId = num(body.car_id);
+  if (!carId || !Number.isInteger(carId)) return { error: "Escolha o carro" };
   return {
     values: [
       date,
@@ -92,11 +94,21 @@ function validate(body: Input) {
       hadTrip,
       hadTrip ? text(body.trip_place) : null,
       text(body.notes, 500),
+      carId,
     ],
   };
 }
 
-const COLS = "id, to_char(filled_on,'YYYY-MM-DD') AS filled_on, km_driven::float8 AS km_driven, liters::float8 AS liters, total_cost::float8 AS total_cost, fuel_type, station, had_trip, trip_place, notes";
+// Brazilian plate: old ABC1234 or Mercosul ABC1D23. Stored upper-case, no hyphen.
+function cleanPlate(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const p = v.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return /^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(p) ? p : null;
+}
+
+const CAR_COLS = "id::int AS id, plate, nickname";
+
+const COLS = "id::int AS id, car_id::int AS car_id, to_char(filled_on,'YYYY-MM-DD') AS filled_on, km_driven::float8 AS km_driven, liters::float8 AS liters, total_cost::float8 AS total_cost, fuel_type, station, had_trip, trip_place, notes";
 
 export default async function handler(request: Request): Promise<Response> {
   const origin = request.headers.get("origin");
@@ -112,6 +124,47 @@ export default async function handler(request: Request): Promise<Response> {
   try {
     if (path === "/auth" && request.method === "GET") return json({ ok: true }, 200, origin);
 
+    if (path === "/cars" && request.method === "GET") {
+      const { rows } = await pool.query(`SELECT ${CAR_COLS} FROM cars ORDER BY created_at ASC, id ASC`);
+      return json(rows, 200, origin);
+    }
+
+    if (path === "/cars" && request.method === "POST") {
+      const body = (await request.json()) as Input;
+      const plate = cleanPlate(body.plate);
+      if (!plate) return json({ error: "Placa inválida (ex.: ABC1D23 ou ABC-1234)" }, 400, origin);
+      const { rows } = await pool.query(
+        `INSERT INTO cars (plate, nickname) VALUES ($1,$2) ON CONFLICT (plate) DO NOTHING RETURNING ${CAR_COLS}`,
+        [plate, text(body.nickname, 40)],
+      );
+      if (!rows[0]) return json({ error: "Essa placa já está cadastrada" }, 409, origin);
+      return json(rows[0], 201, origin);
+    }
+
+    const cm = path.match(/^\/cars\/(\d+)$/);
+    if (cm && request.method === "PUT") {
+      const body = (await request.json()) as Input;
+      const plate = cleanPlate(body.plate);
+      if (!plate) return json({ error: "Placa inválida (ex.: ABC1D23 ou ABC-1234)" }, 400, origin);
+      const dup = await pool.query("SELECT 1 FROM cars WHERE plate=$1 AND id<>$2", [plate, Number(cm[1])]);
+      if (dup.rows.length) return json({ error: "Essa placa já está cadastrada" }, 409, origin);
+      const { rows } = await pool.query(
+        `UPDATE cars SET plate=$1, nickname=$2 WHERE id=$3 RETURNING ${CAR_COLS}`,
+        [plate, text(body.nickname, 40), Number(cm[1])],
+      );
+      if (!rows[0]) return json({ error: "Carro não encontrado" }, 404, origin);
+      return json(rows[0], 200, origin);
+    }
+
+    if (cm && request.method === "DELETE") {
+      const used = await pool.query("SELECT count(*)::int AS n FROM fillups WHERE car_id=$1", [Number(cm[1])]);
+      const n = Number(used.rows[0]?.n || 0);
+      if (n > 0) return json({ error: `Esse carro tem ${n} abastecimento(s). Apague-os antes.` }, 409, origin);
+      const { rowCount } = await pool.query("DELETE FROM cars WHERE id=$1", [Number(cm[1])]);
+      if (!rowCount) return json({ error: "Carro não encontrado" }, 404, origin);
+      return json({ ok: true }, 200, origin);
+    }
+
     if (path === "/fillups" && request.method === "GET") {
       const { rows } = await pool.query(`SELECT ${COLS} FROM fillups ORDER BY filled_on ASC, id ASC`);
       return json(rows, 200, origin);
@@ -121,8 +174,8 @@ export default async function handler(request: Request): Promise<Response> {
       const v = validate((await request.json()) as Input);
       if ("error" in v) return json({ error: v.error }, 400, origin);
       const { rows } = await pool.query(
-        `INSERT INTO fillups (filled_on, km_driven, liters, total_cost, fuel_type, station, had_trip, trip_place, notes)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING ${COLS}`,
+        `INSERT INTO fillups (filled_on, km_driven, liters, total_cost, fuel_type, station, had_trip, trip_place, notes, car_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING ${COLS}`,
         v.values,
       );
       return json(rows[0], 201, origin);
@@ -134,7 +187,7 @@ export default async function handler(request: Request): Promise<Response> {
       if ("error" in v) return json({ error: v.error }, 400, origin);
       const { rows } = await pool.query(
         `UPDATE fillups SET filled_on=$1, km_driven=$2, liters=$3, total_cost=$4, fuel_type=$5, station=$6,
-           had_trip=$7, trip_place=$8, notes=$9, updated_at=now() WHERE id=$10 RETURNING ${COLS}`,
+           had_trip=$7, trip_place=$8, notes=$9, car_id=$10, updated_at=now() WHERE id=$11 RETURNING ${COLS}`,
         [...v.values, Number(m[1])],
       );
       if (!rows[0]) return json({ error: "Não encontrado" }, 404, origin);
@@ -150,6 +203,7 @@ export default async function handler(request: Request): Promise<Response> {
     return json({ error: "Rota não existe" }, 404, origin);
   } catch (err) {
     console.error(err);
+    if (String(err).includes("foreign key")) return json({ error: "Carro não encontrado" }, 400, origin);
     return json({ error: "Erro no servidor" }, 500, origin);
   }
 }

@@ -106,14 +106,16 @@ export function summarize(list: Fillup[], today = new Date()) {
     .map(([k, a]) => ({ month: monthLabel(k), cost: a.cost, km: a.km, kml: a.liters ? a.km / a.liters : 0 }));
 
   // Per station
-  const byStation = new Map<string, Agg>();
+  // Group stations ignoring case/spaces; show the most recent spelling.
+  const byStation = new Map<string, Agg & { name: string }>();
   for (const r of rows) {
-    const k = r.station || "Sem posto";
-    const a = byStation.get(k) || { km: 0, liters: 0, cost: 0, count: 0 };
-    byStation.set(k, { km: a.km + r.km_driven, liters: a.liters + r.liters, cost: a.cost + r.total_cost, count: a.count + 1 });
+    const name = r.station?.trim() || "Sem posto";
+    const k = name.toLowerCase();
+    const a = byStation.get(k) || { km: 0, liters: 0, cost: 0, count: 0, name };
+    byStation.set(k, { km: a.km + r.km_driven, liters: a.liters + r.liters, cost: a.cost + r.total_cost, count: a.count + 1, name });
   }
-  const stations = [...byStation.entries()]
-    .map(([name, a]) => ({ name, count: a.count, pricePerLiter: a.cost / a.liters, kml: a.km / a.liters, cost: a.cost }))
+  const stations = [...byStation.values()]
+    .map((a) => ({ name: a.name, count: a.count, pricePerLiter: a.cost / a.liters, kml: a.km / a.liters, cost: a.cost }))
     .sort((a, b) => b.count - a.count || a.pricePerLiter - b.pricePerLiter);
 
   const trips = rows.filter((r) => r.had_trip && r.trip_place).reverse();
@@ -156,7 +158,7 @@ export function knownStations(list: Fillup[]): string[] {
   const counts = new Map<string, { n: number; last: string; label: string }>();
   for (const f of list) {
     if (!f.station) continue;
-    const k = f.station.toLowerCase();
+    const k = f.station.trim().toLowerCase();
     const c = counts.get(k);
     if (!c) counts.set(k, { n: 1, last: f.filled_on, label: f.station });
     else counts.set(k, { n: c.n + 1, last: f.filled_on > c.last ? f.filled_on : c.last, label: f.filled_on >= c.last ? f.station : c.label });

@@ -1,0 +1,16 @@
+{
+  "name": "Gas Track",
+  "short_name": "Gas Track",
+  "description": "Controle de abastecimentos e consumo",
+  "start_url": "/gas-track/",
+  "scope": "/gas-track/",
+  "display": "standalone",
+  "background_color": "#0d1014",
+  "theme_color": "#e8590c",
+  "icons": [
+    { "src": "/gas-track/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/gas-track/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/gas-track/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/gas-track/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

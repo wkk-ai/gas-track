@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
   basePath: base,
   assetPrefix: base ? `${base}/` : "",
   images: { unoptimized: true },
-  env: { NEXT_PUBLIC_BASE_PATH: base },
+  env: { NEXT_PUBLIC_BASE_PATH: base, NEXT_PUBLIC_BUILD_ID: process.env.BUILD_ID || "dev" },
 };
 
 export default nextConfig;

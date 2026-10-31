@@ -113,6 +113,33 @@ export default function Home() {
     setReady(true);
   }, []);
 
+  // Auto-update: the iPhone keeps the home-screen app in memory, so check for a new version
+  // when the app opens or comes back to the front, and reload if there is one.
+  useEffect(() => {
+    const mine = process.env.NEXT_PUBLIC_BUILD_ID;
+    if (!mine || mine === "dev") return;
+    const check = async () => {
+      try {
+        const r = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/version.json?t=${Date.now()}`, { cache: "no-store" });
+        const { v } = await r.json();
+        if (!v || v === mine) return;
+        // Only one try per new version, so a stale cache can never cause a reload loop.
+        const tried = sessionStorage.getItem("gas-track-update");
+        if (tried === v) return;
+        sessionStorage.setItem("gas-track-update", v);
+        const url = new URL(window.location.href);
+        url.searchParams.set("v", v.slice(0, 7)); // new address skips the cached page
+        window.location.replace(url.toString());
+      } catch {
+        /* offline: keep current version */
+      }
+    };
+    check();
+    const onShow = () => document.visibilityState === "visible" && check();
+    document.addEventListener("visibilitychange", onShow);
+    return () => document.removeEventListener("visibilitychange", onShow);
+  }, []);
+
   useEffect(() => {
     if (authed) load();
   }, [authed, load]);

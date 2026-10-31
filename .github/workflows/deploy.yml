@@ -25,7 +25,11 @@ jobs:
           cache: "npm"
       - run: npm ci
       - run: npx next build
-      - run: touch out/.nojekyll
+        env:
+          BUILD_ID: ${{ github.sha }}
+      - run: |
+          touch out/.nojekyll
+          echo "{\"v\":\"${{ github.sha }}\"}" > out/version.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./out

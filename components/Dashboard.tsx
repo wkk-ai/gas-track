@@ -105,7 +105,7 @@ export default function Dashboard({ data }: { data: Fillup[] }) {
                   tickFormatter={(v: number) => dec(v, 0)} />
                 <Tooltip {...tip} formatter={(v) => [`${dec(Number(v), 1)} km/l`, "Consumo"]} />
                 <ReferenceLine y={s.avgKml} stroke="var(--muted)" strokeDasharray="4 4" />
-                <Line type="monotone" dataKey="kml" stroke="var(--accent)" strokeWidth={2.5} dot={{ r: 3, fill: "var(--accent)" }} />
+                <Line type="monotone" dataKey="kml" stroke="var(--accent)" strokeWidth={2.5} dot={{ r: 3, fill: "var(--accent)" }} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -122,7 +122,7 @@ export default function Dashboard({ data }: { data: Fillup[] }) {
                 <XAxis dataKey="month" tick={axis} tickLine={false} axisLine={false} />
                 <YAxis tick={axis} tickLine={false} axisLine={false} width={40} tickFormatter={(v: number) => int(v)} />
                 <Tooltip {...tip} cursor={{ fill: "var(--surface-2)" }} formatter={(v) => [brl(Number(v)), "Gasto"]} />
-                <Bar dataKey="cost" fill="var(--accent)" radius={[6, 6, 0, 0]} maxBarSize={36} />
+                <Bar dataKey="cost" fill="var(--accent)" radius={[6, 6, 0, 0]} maxBarSize={36} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -139,7 +139,7 @@ export default function Dashboard({ data }: { data: Fillup[] }) {
                 <YAxis tick={axis} tickLine={false} axisLine={false} width={36} domain={["dataMin - 0.2", "dataMax + 0.2"]}
                   tickFormatter={(v: number) => dec(v, 2)} />
                 <Tooltip {...tip} formatter={(v) => [brl(Number(v)), "Litro"]} />
-                <Line type="monotone" dataKey="preco" stroke="var(--ink)" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="preco" stroke="var(--ink)" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -167,20 +167,30 @@ export default function Dashboard({ data }: { data: Fillup[] }) {
         <Section title="Viagens">
           <div className="divide-y divide-line">
             {s.trips.map((t) => (
-              <div key={t.id} className="py-2.5 flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2 font-semibold"><MapPin size={14} className="text-accent" />{t.trip_place}</span>
-                <span className="text-muted text-xs">{fullDate(t.filled_on)} · {int(t.km_driven)} km · {dec(t.kml, 1)} km/l</span>
+              <div key={t.id} className="py-2.5 flex items-start gap-2 text-sm">
+                <MapPin size={15} className="text-accent mt-0.5 shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-semibold">{t.trip_place}</div>
+                  <div className="text-muted text-xs">{fullDate(t.filled_on)} · {int(t.km_driven)} km · {dec(t.kml, 1)} km/l</div>
+                </div>
               </div>
             ))}
           </div>
         </Section>
       )}
 
-      <div className="grid grid-cols-3 gap-3 text-center">
-        <Stat title="Total gasto" value={brl(s.totalCost)} />
-        <Stat title="Total km" value={int(s.totalKm)} />
-        <Stat title="Total litros" value={int(s.totalLiters)} />
-      </div>
+      <section className="card p-4 grid grid-cols-3 divide-x divide-line text-center">
+        {[
+          { t: "Total gasto", v: brl(s.totalCost) },
+          { t: "Total km", v: int(s.totalKm) },
+          { t: "Total litros", v: int(s.totalLiters) },
+        ].map((x) => (
+          <div key={x.t} className="px-1 min-w-0">
+            <div className="text-[11px] font-semibold text-muted">{x.t}</div>
+            <div className="text-sm font-extrabold mt-1 truncate">{x.v}</div>
+          </div>
+        ))}
+      </section>
     </div>
   );
 }

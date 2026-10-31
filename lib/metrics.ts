@@ -106,16 +106,18 @@ export function summarize(list: Fillup[], today = new Date()) {
     .map(([k, a]) => ({ month: monthLabel(k), cost: a.cost, km: a.km, kml: a.liters ? a.km / a.liters : 0 }));
 
   // Per station
-  // Group stations ignoring case/spaces; show the most recent spelling.
-  const byStation = new Map<string, Agg & { name: string }>();
+  // Group stations ignoring case/spaces; show the spelling used most.
+  const byStation = new Map<string, Agg & { spell: Map<string, number> }>();
   for (const r of rows) {
     const name = r.station?.trim() || "Sem posto";
     const k = name.toLowerCase();
-    const a = byStation.get(k) || { km: 0, liters: 0, cost: 0, count: 0, name };
-    byStation.set(k, { km: a.km + r.km_driven, liters: a.liters + r.liters, cost: a.cost + r.total_cost, count: a.count + 1, name });
+    const a = byStation.get(k) || { km: 0, liters: 0, cost: 0, count: 0, spell: new Map<string, number>() };
+    a.spell.set(name, (a.spell.get(name) || 0) + 1);
+    byStation.set(k, { km: a.km + r.km_driven, liters: a.liters + r.liters, cost: a.cost + r.total_cost, count: a.count + 1, spell: a.spell });
   }
+  const topSpelling = (m: Map<string, number>) => [...m.entries()].sort((a, b) => b[1] - a[1])[0][0];
   const stations = [...byStation.values()]
-    .map((a) => ({ name: a.name, count: a.count, pricePerLiter: a.cost / a.liters, kml: a.km / a.liters, cost: a.cost }))
+    .map((a) => ({ name: topSpelling(a.spell), count: a.count, pricePerLiter: a.cost / a.liters, kml: a.km / a.liters, cost: a.cost }))
     .sort((a, b) => b.count - a.count || a.pricePerLiter - b.pricePerLiter);
 
   const trips = rows.filter((r) => r.had_trip && r.trip_place).reverse();
@@ -155,15 +157,20 @@ export function summarize(list: Fillup[], today = new Date()) {
 
 /** Stations used before, most used first — feeds the dropdown. */
 export function knownStations(list: Fillup[]): string[] {
-  const counts = new Map<string, { n: number; last: string; label: string }>();
+  const groups = new Map<string, { n: number; last: string; spell: Map<string, number> }>();
   for (const f of list) {
-    if (!f.station) continue;
-    const k = f.station.trim().toLowerCase();
-    const c = counts.get(k);
-    if (!c) counts.set(k, { n: 1, last: f.filled_on, label: f.station });
-    else counts.set(k, { n: c.n + 1, last: f.filled_on > c.last ? f.filled_on : c.last, label: f.filled_on >= c.last ? f.station : c.label });
+    const name = f.station?.trim();
+    if (!name) continue;
+    const k = name.toLowerCase();
+    const g = groups.get(k) || { n: 0, last: "", spell: new Map<string, number>() };
+    g.n += 1;
+    if (f.filled_on > g.last) g.last = f.filled_on;
+    g.spell.set(name, (g.spell.get(name) || 0) + 1);
+    groups.set(k, g);
   }
-  return [...counts.values()].sort((a, b) => b.n - a.n || (a.last < b.last ? 1 : -1)).map((c) => c.label);
+  return [...groups.values()]
+    .sort((a, b) => b.n - a.n || (a.last < b.last ? 1 : -1))
+    .map((g) => [...g.spell.entries()].sort((a, b) => b[1] - a[1])[0][0]);
 }
 
 export function knownPlaces(list: Fillup[]): string[] {
